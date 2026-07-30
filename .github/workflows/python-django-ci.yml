@@ -1,0 +1,146 @@
+name: Reusable Python Django CI
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version used by the project.
+        required: false
+        type: string
+        default: "3.13"
+      install-command:
+        description: Dependency installation command.
+        required: true
+        type: string
+      lint-command:
+        description: Lint command.
+        required: true
+        type: string
+      format-check-command:
+        description: Optional formatting check command.
+        required: false
+        type: string
+        default: ""
+      type-check-command:
+        description: Optional type check command.
+        required: false
+        type: string
+        default: ""
+      django-check-command:
+        description: Optional Django system check command.
+        required: false
+        type: string
+        default: ""
+      migration-check-command:
+        description: Optional migration drift check command.
+        required: false
+        type: string
+        default: ""
+      test-command:
+        description: Test command.
+        required: true
+        type: string
+      postgres-version:
+        description: PostgreSQL service version.
+        required: false
+        type: string
+        default: "17"
+      redis-version:
+        description: Redis service version.
+        required: false
+        type: string
+        default: "7"
+      upload-artifacts-path:
+        description: Optional path to upload as a test artifact.
+        required: false
+        type: string
+        default: reports/
+
+jobs:
+  quality:
+    name: Django Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres-version }}-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:${{ inputs.redis-version }}-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      SECRET_KEY: ci-only-secret
+      DEBUG: "false"
+      TESTING: "true"
+      DATABASE_NAME: app
+      DATABASE_USERNAME: app
+      DATABASE_PASSWORD: app
+      DATABASE_HOST: localhost
+      DATABASE_PORT: "5432"
+      TEST_DATABASE_NAME: app_test
+      REDIS_URL: redis://localhost:6379/0
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      WEB_REDIRECT_HOST: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Lint
+        run: ${{ inputs.lint-command }}
+
+      - name: Format check
+        if: inputs.format-check-command != ''
+        run: ${{ inputs.format-check-command }}
+
+      - name: Type check
+        if: inputs.type-check-command != ''
+        run: ${{ inputs.type-check-command }}
+
+      - name: Django system check
+        if: inputs.django-check-command != ''
+        run: ${{ inputs.django-check-command }}
+
+      - name: Migration drift check
+        if: inputs.migration-check-command != ''
+        run: ${{ inputs.migration-check-command }}
+
+      - name: Test
+        run: ${{ inputs.test-command }}
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: django-quality-artifacts
+          path: ${{ inputs.upload-artifacts-path }}
+          if-no-files-found: ignore
+

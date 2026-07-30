@@ -1,0 +1,13 @@
+[
+  {
+    "name": "api",
+    "repository": "example-api",
+    "dockerfile": ".docker/Dockerfile.api",
+    "buildArgs": "",
+    "taskTemplate": "task_definition_api.j2",
+    "taskOutput": "task_definition_api.json",
+    "ecsService": "example-api",
+    "deploy": true
+  }
+]
+

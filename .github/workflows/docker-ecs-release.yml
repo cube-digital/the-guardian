@@ -1,0 +1,180 @@
+name: Reusable Docker ECS Release
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment name.
+        required: true
+        type: string
+      aws-region:
+        required: true
+        type: string
+      aws-role-to-assume:
+        required: true
+        type: string
+      ecr-registry:
+        description: Registry host, e.g. 123456789012.dkr.ecr.eu-west-2.amazonaws.com.
+        required: true
+        type: string
+      image-manifest-path:
+        description: JSON manifest in caller repo.
+        required: true
+        type: string
+      ecs-cluster-name:
+        required: true
+        type: string
+      task-definition-template-dir:
+        required: false
+        type: string
+        default: .deploy/ecs
+      smoke-command:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  manifest:
+    name: Read Image Manifest
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+      short-sha: ${{ steps.sha.outputs.short-sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Short SHA
+        id: sha
+        run: echo "short-sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Read manifest
+        id: read
+        run: |
+          jq -e 'type == "array"' "${{ inputs.image-manifest-path }}"
+          echo "matrix=$(jq -c '{include: .}' "${{ inputs.image-manifest-path }}")" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.manifest.outputs.matrix) }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ inputs.ecr-registry }}/${{ matrix.repository }}:${{ needs.manifest.outputs.short-sha }}
+            ${{ inputs.ecr-registry }}/${{ matrix.repository }}:latest
+          build-args: ${{ matrix.buildArgs }}
+
+      - name: Attest image provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ inputs.ecr-registry }}/${{ matrix.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  deploy:
+    name: Deploy ${{ matrix.name }}
+    needs:
+      - manifest
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.manifest.outputs.matrix) }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        if: matrix.taskTemplate != null
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials
+        if: matrix.taskTemplate != null
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Render ECS task definition
+        if: matrix.taskTemplate != null
+        run: |
+          pipx run jinja2-cli \
+            "${{ inputs.task-definition-template-dir }}/${{ matrix.taskTemplate }}" \
+            -D ENVIRONMENT="${{ inputs.environment }}" \
+            -D AWS_REGION="${{ inputs.aws-region }}" \
+            -D IMAGE_TAG="${{ needs.manifest.outputs.short-sha }}" \
+            -D AWS_ECS_CLUSTER_NAME="${{ inputs.ecs-cluster-name }}" \
+            -o "${{ inputs.task-definition-template-dir }}/${{ matrix.taskOutput }}"
+
+      - name: Register task definition
+        if: matrix.taskTemplate != null
+        id: register
+        run: |
+          ARN=$(aws ecs register-task-definition \
+            --cli-input-json "file://${{ inputs.task-definition-template-dir }}/${{ matrix.taskOutput }}" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "task-definition-arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS service
+        if: matrix.taskTemplate != null && matrix.deploy == true
+        run: |
+          aws ecs update-service \
+            --cluster "${{ inputs.ecs-cluster-name }}" \
+            --service "${{ matrix.ecsService }}" \
+            --task-definition "${{ steps.register.outputs.task-definition-arn }}" \
+            --force-new-deployment
+
+      - name: Skip deploy
+        if: matrix.taskTemplate == null
+        run: echo "No task template configured for ${{ matrix.name }}."
+
+  smoke:
+    name: Smoke Test
+    needs: deploy
+    if: inputs.smoke-command != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Run smoke test
+        run: ${{ inputs.smoke-command }}

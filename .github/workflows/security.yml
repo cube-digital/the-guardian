@@ -1,0 +1,153 @@
+name: Reusable Security Gate
+
+on:
+  workflow_call:
+    inputs:
+      codeql-languages:
+        description: JSON array of CodeQL languages.
+        required: false
+        type: string
+        default: '["python"]'
+      dependency-review-config:
+        description: Path to dependency review config in the caller repository.
+        required: false
+        type: string
+        default: ""
+      trivy-scan-ref:
+        description: Repository path scanned by Trivy.
+        required: false
+        type: string
+        default: "."
+      semgrep-config:
+        description: Semgrep rule pack/config.
+        required: false
+        type: string
+        default: p/default
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Dependency review with project policy
+        if: inputs.dependency-review-config != ''
+        uses: actions/dependency-review-action@v5
+        with:
+          config-file: ${{ inputs.dependency-review-config }}
+
+      - name: Dependency review with defaults
+        if: inputs.dependency-review-config == ''
+        uses: actions/dependency-review-action@v5
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJson(inputs.codeql-languages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Semgrep
+        run: semgrep ci --config "${{ inputs.semgrep-config }}" --sarif --output semgrep.sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+  trivy:
+    name: Trivy Repository Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ inputs.trivy-scan-ref }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - dependency-review
+      - codeql
+      - semgrep
+      - trivy
+    steps:
+      - name: Check security results
+        run: |
+          for result in \
+            "${{ needs.dependency-review.result }}" \
+            "${{ needs.codeql.result }}" \
+            "${{ needs.semgrep.result }}" \
+            "${{ needs.trivy.result }}"
+          do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "A security job failed or was cancelled."
+              exit 1
+            fi
+          done
+          echo "Security gate passed."
