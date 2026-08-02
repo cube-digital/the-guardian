@@ -53,8 +53,12 @@ jobs:
       - name: Read manifest
         id: read
         run: |
-          jq -e 'type == "array"' "${{ inputs.image-manifest-path }}"
-          echo "matrix=$(jq -c '{include: .}' "${{ inputs.image-manifest-path }}")" >> "$GITHUB_OUTPUT"
+          jq \
+            --arg registry "${{ inputs.ecr-registry }}" \
+            'walk(if type == "string" then gsub("\\$\\{ECR_REGISTRY\\}"; $registry) else . end)' \
+            "${{ inputs.image-manifest-path }}" > .release-manifest.json
+          jq -e 'type == "array"' .release-manifest.json
+          echo "matrix=$(jq -c '{include: .}' .release-manifest.json)" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.name }}
