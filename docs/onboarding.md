@@ -12,6 +12,7 @@ For a Django backend, start with:
 .github/workflows/ci.yml
 .github/workflows/security.yml
 .github/workflows/scorecard.yml
+.github/workflows/codex-review.yml
 ```
 
 Add release workflows only after CI/security are passing.
@@ -34,6 +35,12 @@ This file should explain:
 - commands used locally and in CI
 
 AI review tools such as Qodo should use this context. Human reviewers should also be able to read it.
+
+For custom Codex review, also add:
+
+```text
+.github/codex/review-policy.yml
+```
 
 ## 3. Add Dependency Policy
 
@@ -88,6 +95,5 @@ Recommended sequence:
 2. Fix obvious failures.
 3. Turn CI into a required check.
 4. Turn security into a required check.
-5. Add AI review as advisory.
+5. Add Codex PR review as advisory.
 6. Promote specific AI/policy checks to blocking only after measuring noise.
-

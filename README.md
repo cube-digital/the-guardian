@@ -16,6 +16,7 @@ This repository is intended to be versioned and consumed by application reposito
 ```text
 .github/workflows/
   python-django-ci.yml       Reusable CI for Django/DRF backends
+  codex-pr-review.yml        Reusable custom Codex PR review agent
   security.yml               Reusable dependency/SAST/filesystem security gate
   docker-ecs-release.yml     Reusable Docker build, push, attestation, ECS release
   scorecard.yml              Reusable scheduled OpenSSF Scorecard workflow
@@ -24,6 +25,7 @@ docs/
   onboarding.md              How to onboard a project repo
   rulesets.md                Recommended GitHub branch/tag rules
   qodo.md                    How Qodo fits into this stack
+  codex-pr-agents.md         How custom Codex PR agents work
 
 policies/
   dependency-review.yml      Baseline dependency policy
@@ -51,6 +53,25 @@ jobs:
 
 The platform owns the process. The project owns the commands, domain instructions, deploy targets, and exceptions.
 
+## Custom Codex PR Review
+
+Projects can opt into a custom AI review agent:
+
+```yaml
+jobs:
+  codex-review:
+    uses: your-org/engineering-platform/.github/workflows/codex-pr-review.yml@v1
+    with:
+      instructions-file: AGENTS.md
+      review-policy-file: .github/codex/review-policy.yml
+      review-profile: strict-backend
+      blocking: false
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+Start with `blocking: false`. Promote to blocking only after the team has measured useful findings versus noise.
+
 ## Versioning
 
 Tag stable releases:
@@ -67,4 +88,3 @@ uses: your-org/engineering-platform/.github/workflows/python-django-ci.yml@v1.0.
 ```
 
 For fast internal iteration, projects may temporarily consume `@main`, but production repositories should pin a release tag.
-

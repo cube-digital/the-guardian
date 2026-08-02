@@ -1,11 +1,11 @@
 # Qodo Integration
 
-Qodo is the recommended candidate for the AI code review layer.
+Qodo is an optional hosted candidate for the AI code review layer.
 
-This platform repository does not replace Qodo. It provides the deterministic gates around it:
+This platform repository now includes a custom Codex PR review workflow. Use Qodo only if you decide you want a hosted governance product instead of owning the review agent yourselves.
 
 ```text
-Qodo = review intelligence
+Qodo or custom Codex = review intelligence
 GitHub Actions = deterministic checks
 GitHub rulesets = enforcement
 ```
@@ -43,4 +43,3 @@ Do not make these blocking at first:
 - comments about code that deterministic tools already cover
 
 Let Ruff, tests, security scanners, and rulesets handle deterministic enforcement.
-

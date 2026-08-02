@@ -1,0 +1,256 @@
+name: Reusable Codex PR Review
+
+on:
+  workflow_call:
+    inputs:
+      instructions-file:
+        description: Repository instructions file read by Codex.
+        required: false
+        type: string
+        default: AGENTS.md
+      review-policy-file:
+        description: Optional project policy file with risk profiles and extra rules.
+        required: false
+        type: string
+        default: .github/codex/review-policy.yml
+      review-profile:
+        description: Human-readable review profile name.
+        required: false
+        type: string
+        default: standard
+      high-risk-paths:
+        description: Newline-separated path globs that should receive stricter review.
+        required: false
+        type: string
+        default: ""
+      local-verification-command:
+        description: Commands developers are expected to run locally.
+        required: false
+        type: string
+        default: ""
+      blocking:
+        description: Fail the workflow when Codex reports P0/P1 findings.
+        required: false
+        type: boolean
+        default: false
+      model:
+        description: Optional model override. Leave empty to use Codex default.
+        required: false
+        type: string
+        default: ""
+      effort:
+        description: Optional reasoning effort override.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+
+jobs:
+  codex-review:
+    name: Codex PR Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    outputs:
+      final-message: ${{ steps.run-codex.outputs.final-message }}
+
+    steps:
+      - name: Checkout PR merge commit
+        uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch PR refs
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Prepare review context
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REVIEW_PROFILE: ${{ inputs.review-profile }}
+          INSTRUCTIONS_FILE: ${{ inputs.instructions-file }}
+          REVIEW_POLICY_FILE: ${{ inputs.review-policy-file }}
+          HIGH_RISK_PATHS: ${{ inputs.high-risk-paths }}
+          LOCAL_VERIFICATION_COMMAND: ${{ inputs.local-verification-command }}
+          BLOCKING: ${{ inputs.blocking }}
+        run: |
+          mkdir -p .codex-review
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > .codex-review/changed-files.txt
+          git diff --stat "$BASE_SHA" "$HEAD_SHA" > .codex-review/diff-stat.txt
+          git diff --unified=80 "$BASE_SHA" "$HEAD_SHA" > .codex-review/pr.diff
+
+          {
+            echo "# Codex PR Review Context"
+            echo
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "PR: #$PR_NUMBER"
+            echo "Title: $PR_TITLE"
+            echo "Review profile: $REVIEW_PROFILE"
+            echo "Blocking mode: $BLOCKING"
+            echo
+            echo "## PR Body"
+            echo "$PR_BODY"
+            echo
+            echo "## Instructions File"
+            echo "$INSTRUCTIONS_FILE"
+            echo
+            echo "## Review Policy File"
+            echo "$REVIEW_POLICY_FILE"
+            echo
+            echo "## High-Risk Paths"
+            echo "$HIGH_RISK_PATHS"
+            echo
+            echo "## Local Verification Command"
+            echo "$LOCAL_VERIFICATION_COMMAND"
+            echo
+            echo "## Changed Files"
+            cat .codex-review/changed-files.txt
+            echo
+            echo "## Diff Stat"
+            cat .codex-review/diff-stat.txt
+          } > .codex-review/context.md
+
+          cat > .codex-review/prompt.md <<'EOF'
+          You are Codex reviewing a GitHub pull request.
+
+          Your task is to review only the pull request changes, not the whole codebase.
+
+          First read:
+
+          - `.codex-review/context.md`
+          - `.codex-review/changed-files.txt`
+          - `.codex-review/diff-stat.txt`
+          - `.codex-review/pr.diff`
+
+          Then read the repository instructions file named in `.codex-review/context.md` if it exists.
+
+          If a review policy file is named in `.codex-review/context.md` and exists, read it too.
+
+          Review priorities:
+
+          1. Correctness bugs.
+          2. Security regressions.
+          3. Authentication, authorization, tenant/workspace isolation, and data leakage.
+          4. Idempotency, replay, webhook, payment, signing, and migration risk when applicable.
+          5. Missing or weak tests for changed behavior.
+          6. Deployment or CI/CD risk when workflows, Dockerfiles, or infrastructure files change.
+
+          Avoid commenting on:
+
+          - formatting issues that deterministic tools catch
+          - subjective style preferences
+          - speculative rewrites
+          - unrelated existing code outside the PR
+
+          Output format:
+
+          ## Codex PR Review
+
+          ### Verdict
+          Choose one:
+          - No blocking findings
+          - Review recommended
+          - Action required
+
+          ### Findings
+
+          Use this format for every finding:
+
+          #### [P1] Short Title
+          File: path/to/file.py
+          Lines: 10-15 if known
+
+          Explain the issue, why it matters, and the smallest reasonable fix.
+
+          ### Missing Tests
+
+          List specific tests that should be added, or say "None found."
+
+          ### Notes
+
+          Mention non-blocking observations only if useful.
+
+          Severity guidance:
+
+          - `P0`: exploitable security issue, data loss, production outage, or secret exposure.
+          - `P1`: likely bug/security/regression risk that should be fixed before merge.
+          - `P2`: real issue that can be fixed soon but is not necessarily merge-blocking.
+          - `P3`: minor maintainability note.
+
+          Be concise, specific, and file-grounded. If you are unsure, say what evidence would confirm the issue.
+          EOF
+
+      - name: Run Codex review
+        id: run-codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          model: ${{ inputs.model }}
+          effort: ${{ inputs.effort }}
+          prompt-file: .codex-review/prompt.md
+          output-file: .codex-review/final-review.md
+
+      - name: Post Codex review comment
+        if: steps.run-codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          REVIEW_BODY: ${{ steps.run-codex.outputs.final-message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const marker = '<!-- codex-pr-review -->';
+            const body = `${marker}\n${process.env.REVIEW_BODY}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+      - name: Enforce blocking findings
+        if: inputs.blocking
+        run: |
+          if grep -Eiq '(^|[^A-Z0-9])(P0|P1|critical|action required)([^A-Z0-9]|$)' .codex-review/final-review.md; then
+            echo "Codex reported blocking findings."
+            exit 1
+          fi
+          echo "No blocking findings detected."
