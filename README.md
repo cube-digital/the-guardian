@@ -24,7 +24,6 @@ This repository is intended to be versioned and consumed by application reposito
 docs/
   onboarding.md              How to onboard a project repo
   rulesets.md                Recommended GitHub branch/tag rules
-  qodo.md                    How Qodo fits into this stack
   codex-pr-agents.md         How custom Codex PR agents work
 
 policies/

@@ -34,7 +34,7 @@ This file should explain:
 - test expectations
 - commands used locally and in CI
 
-AI review tools such as Qodo should use this context. Human reviewers should also be able to read it.
+The custom Codex PR reviewer uses this context. Human reviewers should also be able to read it.
 
 For custom Codex review, also add:
 
@@ -85,7 +85,7 @@ Django Quality Gate
 Security Gate
 ```
 
-If Qodo is enabled, add the Qodo review status check once the team trusts its signal.
+If Codex PR review is enabled in blocking mode, add the Codex review status check once the team trusts its signal.
 
 ## 7. Roll Out In Advisory Mode First
 
