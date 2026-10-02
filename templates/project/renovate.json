@@ -1,7 +1,0 @@
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "github>your-org/engineering-platform//policies/renovate-base.json"
-  ]
-}
-

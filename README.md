@@ -1,6 +1,6 @@
-# Engineering Platform Starter
+# The Guardian
 
-Central reusable automation for GitHub-hosted projects.
+Central reusable automation for GitHub-hosted projects — the platform that guards what gets tested, reviewed, and deployed.
 
 This repository is intended to be versioned and consumed by application repositories through GitHub reusable workflows.
 
@@ -22,16 +22,16 @@ This repository is intended to be versioned and consumed by application reposito
   scorecard.yml              Reusable scheduled OpenSSF Scorecard workflow
 
 docs/
-  onboarding.md              How to onboard a project repo
   rulesets.md                Recommended GitHub branch/tag rules
   codex-pr-agents.md         How custom Codex PR agents work
+  the-guardian/              Guides copied into project repos during onboarding
+    onboarding.md              Dispatcher: order to read/use the guides below
+    QA_TEST_GENERATION_GUIDE.md  How to analyze a repo and generate real tests
+    WRAPPER_GENERATION_GUIDE.md  How to generate project-side CI/AGENTS.md wrappers
 
 policies/
   dependency-review.yml      Baseline dependency policy
   renovate-base.json         Baseline Renovate config preset
-
-templates/project/
-  Example files copied into project repositories
 ```
 
 ## Consumption Model
@@ -41,7 +41,7 @@ Application repositories should keep thin wrapper workflows:
 ```yaml
 jobs:
   ci:
-    uses: your-org/engineering-platform/.github/workflows/python-django-ci.yml@v1
+    uses: cube-digital/the-guardian/.github/workflows/python-django-ci.yml@v1
     with:
       python-version: "3.13"
       install-command: uv sync --frozen
@@ -59,7 +59,7 @@ Projects can opt into a custom AI review agent:
 ```yaml
 jobs:
   codex-review:
-    uses: your-org/engineering-platform/.github/workflows/codex-pr-review.yml@v1
+    uses: cube-digital/the-guardian/.github/workflows/codex-pr-review.yml@v1
     with:
       instructions-file: AGENTS.md
       review-policy-file: .github/codex/review-policy.yml
@@ -83,7 +83,7 @@ git push origin v1.0.0
 Projects should consume pinned tags:
 
 ```yaml
-uses: your-org/engineering-platform/.github/workflows/python-django-ci.yml@v1.0.0
+uses: cube-digital/the-guardian/.github/workflows/python-django-ci.yml@v1.0.0
 ```
 
 For fast internal iteration, projects may temporarily consume `@main`, but production repositories should pin a release tag.

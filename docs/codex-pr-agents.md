@@ -1,6 +1,6 @@
 # Custom Codex PR Agents
 
-This platform supports a custom AI code review layer using `openai/codex-action`.
+The Guardian supports a custom AI code review layer using `openai/codex-action`.
 
 The goal is to keep the review agent customizable:
 
@@ -74,7 +74,7 @@ The policy file should describe domain-specific risks, for example:
 risk_profiles:
   payments:
     paths:
-      - docupal/payments/**
+      - src/payments/**
     required_review:
       - webhook signature validation
       - idempotency and replay protection

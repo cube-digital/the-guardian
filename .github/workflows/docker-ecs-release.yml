@@ -141,7 +141,7 @@ jobs:
       - name: Render ECS task definition
         if: matrix.taskTemplate != null
         run: |
-          pipx run jinja2-cli \
+          pipx run jinja2-cli==1.0.1 \
             "${{ inputs.task-definition-template-dir }}/${{ matrix.taskTemplate }}" \
             -D ENVIRONMENT="${{ inputs.environment }}" \
             -D AWS_REGION="${{ inputs.aws-region }}" \
@@ -167,6 +167,13 @@ jobs:
             --service "${{ matrix.ecsService }}" \
             --task-definition "${{ steps.register.outputs.task-definition-arn }}" \
             --force-new-deployment
+
+      - name: Wait for service stability
+        if: matrix.taskTemplate != null && matrix.deploy == true
+        run: |
+          aws ecs wait services-stable \
+            --cluster "${{ inputs.ecs-cluster-name }}" \
+            --services "${{ matrix.ecsService }}"
 
       - name: Skip deploy
         if: matrix.taskTemplate == null
